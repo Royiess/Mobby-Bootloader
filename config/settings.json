@@ -1,0 +1,17 @@
+{
+    "maintenance": false,
+
+    "presence": {
+        "status": "online",
+        "activity": "Watching Mobby"
+    },
+
+    "heartbeatTimeout": 90000,
+
+    "allowGuests": false,
+
+    "dashboard": {
+        "title": "Mobby Bootloader",
+        "theme": "dark"
+    }
+}
