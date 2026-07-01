@@ -1,7 +1,14 @@
 require("dotenv").config();
+const express = require("express");
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const OWNER_ID = "1101862076839886971";
+
+/*
+==========================
+DISCORD CLIENT
+==========================
+*/
 
 const client = new Client({
     intents: [
@@ -9,6 +16,26 @@ const client = new Client({
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent
     ]
+});
+
+/*
+==========================
+EXPRESS (RENDER FIX)
+==========================
+*/
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+    res.json({
+        status: "Bootloader online",
+        bot: client.user?.tag || "starting"
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`HTTP server running on ${PORT}`);
 });
 
 /*
@@ -24,7 +51,7 @@ let maintenanceTimeout = null;
 
 /*
 ==========================
-REGISTER SERVICES
+SERVICES
 ==========================
 */
 
@@ -54,9 +81,7 @@ function setAll(status) {
 }
 
 function parseTime(input) {
-    if (!input) return null;
-
-    const match = input.match(/^(\d+)(s|m|h|d|w|mo|y)$/);
+    const match = input?.match(/^(\d+)(s|m|h|d|w|mo|y)$/);
     if (!match) return null;
 
     const value = Number(match[1]);
@@ -64,12 +89,12 @@ function parseTime(input) {
 
     const map = {
         s: 1000,
-        m: 1000 * 60,
-        h: 1000 * 60 * 60,
-        d: 1000 * 60 * 60 * 24,
-        w: 1000 * 60 * 60 * 24 * 7,
-        mo: 1000 * 60 * 60 * 24 * 30,
-        y: 1000 * 60 * 60 * 24 * 365
+        m: 60000,
+        h: 3600000,
+        d: 86400000,
+        w: 604800000,
+        mo: 2592000000,
+        y: 31536000000
     };
 
     return value * map[unit];
@@ -84,135 +109,95 @@ COMMAND HANDLER
 client.on("messageCreate", async (message) => {
 
     if (message.author.bot) return;
-
-    const prefix = "mb.";
-    if (!message.content.startsWith(prefix)) return;
+    if (!message.content.startsWith("mb.")) return;
 
     // OWNER LOCK
-    if (message.author.id !== OWNER_ID) {
-        return message.reply("❌ Not authorized.");
-    }
+    if (message.author.id !== OWNER_ID) return;
 
-    const args = message.content.slice(prefix.length).trim().split(" ");
+    const args = message.content.slice(3).trim().split(" ");
     const cmd = args.shift()?.toLowerCase();
 
-    /*
-    ==========================
-    HELP
-    ==========================
-    */
+    try {
 
-    if (cmd === "help") {
-        return message.reply(
+        switch (cmd) {
+
+            case "help":
+                return message.reply(
 `**Mobby Bootloader Commands**
-
 mb.help
 mb.status
-
 mb.startservices
 mb.stopservices
-
 mb.mt on/off
 mb.tm on <time>`
-        );
-    }
+                );
 
-    /*
-    ==========================
-    STATUS
-    ==========================
-    */
+            case "status": {
+                let out = "**Mobby Bootloader Status**\n\n";
 
-    if (cmd === "status") {
+                for (const s of services.values()) {
+                    out += `**${s.name}** → ${s.status}\n`;
+                }
 
-        let out = "**Mobby Bootloader Status**\n\n";
+                out += `\nMaintenance: ${maintenance ? "ON" : "OFF"}`;
 
-        for (const s of services.values()) {
-            out += `**${s.name}** → ${s.status}\n`;
+                return message.reply(out);
+            }
+
+            case "startservices":
+                setAll("online");
+                return message.reply("🟢 Services ONLINE");
+
+            case "stopservices":
+                setAll("offline");
+                return message.reply("🔴 Services OFFLINE");
+
+            case "mt": {
+                const mode = args[0];
+
+                if (maintenanceTimeout) {
+                    clearTimeout(maintenanceTimeout);
+                    maintenanceTimeout = null;
+                }
+
+                if (mode === "on") {
+                    maintenance = true;
+                    return message.reply("🚧 Maintenance ON");
+                }
+
+                if (mode === "off") {
+                    maintenance = false;
+                    return message.reply("🟢 Maintenance OFF");
+                }
+
+                return message.reply("Usage: mb.mt on/off");
+            }
+
+            case "tm": {
+                if (args[0] !== "on") {
+                    return message.reply("Usage: mb.tm on <time>");
+                }
+
+                const ms = parseTime(args[1]);
+                if (!ms) return message.reply("Invalid time format");
+
+                maintenance = true;
+
+                if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
+
+                maintenanceTimeout = setTimeout(() => {
+                    maintenance = false;
+                    message.channel.send("🟢 Maintenance ended");
+                }, ms);
+
+                return message.reply(`🚧 Maintenance ON for ${args[1]}`);
+            }
+
         }
 
-        out += `\nMaintenance: ${maintenance ? "ON" : "OFF"}`;
-
-        return message.reply(out);
-    }
-
-    /*
-    ==========================
-    START / STOP SERVICES
-    ==========================
-    */
-
-    if (cmd === "startservices") {
-        setAll("online");
-        return message.reply("🟢 All services ONLINE");
-    }
-
-    if (cmd === "stopservices") {
-        setAll("offline");
-        return message.reply("🔴 All services OFFLINE");
-    }
-
-    /*
-    ==========================
-    MAINTENANCE TOGGLE
-    ==========================
-    */
-
-    if (cmd === "mt") {
-
-        const mode = args[0];
-
-        if (maintenanceTimeout) {
-            clearTimeout(maintenanceTimeout);
-            maintenanceTimeout = null;
-        }
-
-        if (mode === "on") {
-            maintenance = true;
-            return message.reply("🚧 Maintenance ON");
-        }
-
-        if (mode === "off") {
-            maintenance = false;
-            return message.reply("🟢 Maintenance OFF");
-        }
-
-        return message.reply("Usage: mb.mt on/off");
-    }
-
-    /*
-    ==========================
-    TIMED MAINTENANCE
-    ==========================
-    */
-
-    if (cmd === "tm") {
-
-        const mode = args[0];
-        const timeRaw = args[1];
-
-        if (mode !== "on") {
-            return message.reply("Usage: mb.tm on <time>");
-        }
-
-        const ms = parseTime(timeRaw);
-
-        if (!ms) {
-            return message.reply("Invalid time format (e.g. 5m, 10s, 2h)");
-        }
-
-        maintenance = true;
-
-        if (maintenanceTimeout) {
-            clearTimeout(maintenanceTimeout);
-        }
-
-        maintenanceTimeout = setTimeout(() => {
-            maintenance = false;
-            message.channel.send("🟢 Timed maintenance ended");
-        }, ms);
-
-        return message.reply(`🚧 Maintenance ON for ${timeRaw}`);
+    } catch (err) {
+        console.error(err);
+        return message.reply("❌ Error executing command");
     }
 
 });
@@ -223,7 +208,7 @@ READY
 ==========================
 */
 
-client.once("ready", () => {
+client.once("clientReady", () => {
     console.log(`Bootloader online as ${client.user.tag}`);
 });
 
