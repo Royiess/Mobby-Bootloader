@@ -1,6 +1,8 @@
 require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 
+const OWNER_ID = "1101862076839886971";
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -22,7 +24,7 @@ let maintenanceTimeout = null;
 
 /*
 ==========================
-SERVICES
+REGISTER SERVICES
 ==========================
 */
 
@@ -47,17 +49,20 @@ UTILS
 function setAll(status) {
     for (const s of services.values()) {
         s.status = status;
+        s.lastUpdate = Date.now();
     }
 }
 
 function parseTime(input) {
+    if (!input) return null;
+
     const match = input.match(/^(\d+)(s|m|h|d|w|mo|y)$/);
     if (!match) return null;
 
-    const value = parseInt(match[1]);
+    const value = Number(match[1]);
     const unit = match[2];
 
-    const multipliers = {
+    const map = {
         s: 1000,
         m: 1000 * 60,
         h: 1000 * 60 * 60,
@@ -67,12 +72,12 @@ function parseTime(input) {
         y: 1000 * 60 * 60 * 24 * 365
     };
 
-    return value * (multipliers[unit] || 0);
+    return value * map[unit];
 }
 
 /*
 ==========================
-COMMANDS
+COMMAND HANDLER
 ==========================
 */
 
@@ -81,8 +86,12 @@ client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     const prefix = "mb.";
-
     if (!message.content.startsWith(prefix)) return;
+
+    // OWNER LOCK
+    if (message.author.id !== OWNER_ID) {
+        return message.reply("❌ Not authorized.");
+    }
 
     const args = message.content.slice(prefix.length).trim().split(" ");
     const cmd = args.shift()?.toLowerCase();
@@ -94,8 +103,8 @@ client.on("messageCreate", async (message) => {
     */
 
     if (cmd === "help") {
-        return message.reply(`
-**Mobby Bootloader Commands**
+        return message.reply(
+`**Mobby Bootloader Commands**
 
 mb.help
 mb.status
@@ -104,8 +113,8 @@ mb.startservices
 mb.stopservices
 
 mb.mt on/off
-mb.tm on <time>
-        `);
+mb.tm on <time>`
+        );
     }
 
     /*
@@ -135,17 +144,17 @@ mb.tm on <time>
 
     if (cmd === "startservices") {
         setAll("online");
-        return message.reply("🟢 All services set to ONLINE");
+        return message.reply("🟢 All services ONLINE");
     }
 
     if (cmd === "stopservices") {
         setAll("offline");
-        return message.reply("🔴 All services set to OFFLINE");
+        return message.reply("🔴 All services OFFLINE");
     }
 
     /*
     ==========================
-    MAINTENANCE TOGGLE (NO TIMER)
+    MAINTENANCE TOGGLE
     ==========================
     */
 
@@ -153,18 +162,19 @@ mb.tm on <time>
 
         const mode = args[0];
 
+        if (maintenanceTimeout) {
+            clearTimeout(maintenanceTimeout);
+            maintenanceTimeout = null;
+        }
+
         if (mode === "on") {
             maintenance = true;
-            if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
-
-            return message.reply("🚧 Maintenance ENABLED");
+            return message.reply("🚧 Maintenance ON");
         }
 
         if (mode === "off") {
             maintenance = false;
-            if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
-
-            return message.reply("🟢 Maintenance DISABLED");
+            return message.reply("🟢 Maintenance OFF");
         }
 
         return message.reply("Usage: mb.mt on/off");
@@ -188,12 +198,14 @@ mb.tm on <time>
         const ms = parseTime(timeRaw);
 
         if (!ms) {
-            return message.reply("Invalid time format. Example: 5m, 10s, 2h, 1d");
+            return message.reply("Invalid time format (e.g. 5m, 10s, 2h)");
         }
 
         maintenance = true;
 
-        if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
+        if (maintenanceTimeout) {
+            clearTimeout(maintenanceTimeout);
+        }
 
         maintenanceTimeout = setTimeout(() => {
             maintenance = false;
@@ -207,7 +219,7 @@ mb.tm on <time>
 
 /*
 ==========================
-LOGIN
+READY
 ==========================
 */
 
