@@ -6,10 +6,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
-
-const bots = {};
 
 app.use(helmet());
 app.use(cors());
@@ -18,136 +15,213 @@ app.use(morgan("dev"));
 
 /*
 ==========================
-Health Check
+STATE
+==========================
+*/
+
+const services = {};
+
+let maintenance = false;
+
+/*
+==========================
+UTILS
+==========================
+*/
+
+function now() {
+    return Date.now();
+}
+
+function isTimedOut(service) {
+    return now() - service.lastSeen > 90000;
+}
+
+/*
+==========================
+HEALTH CHECK
 ==========================
 */
 
 app.get("/", (req, res) => {
-
     res.json({
         project: "Mobby Bootloader",
         version: "1.0.0",
-        onlineBots: Object.keys(bots).length
+        maintenance,
+        onlineServices: Object.keys(services).length
     });
-
 });
 
 /*
 ==========================
-Heartbeat
+HEARTBEAT (from bots/services)
 ==========================
 */
 
 app.post("/heartbeat", (req, res) => {
 
-    const data = req.body;
+    const { id, name, status, ping, ram, guilds } = req.body;
 
-    bots[data.name] = {
+    if (!id) {
+        return res.status(400).json({
+            success: false,
+            error: "Missing service id"
+        });
+    }
 
-        status: data.status,
-        ping: data.ping,
-        ram: data.ram,
-        guilds: data.guilds,
-
-        lastSeen: Date.now()
-
+    services[id] = {
+        id,
+        name: name || id,
+        status: status || "unknown",
+        ping: ping ?? null,
+        ram: ram ?? null,
+        guilds: guilds ?? null,
+        lastSeen: now()
     };
 
-    res.json({
-        success: true
-    });
-
+    res.json({ success: true });
 });
 
 /*
 ==========================
-Get Bots
+GET SERVICES
 ==========================
 */
 
-app.get("/bots", (req, res) => {
-
-    res.json(bots);
-
+app.get("/services", (req, res) => {
+    res.json(services);
 });
 
 /*
 ==========================
-Maintenance
+MAINTENANCE CONTROL
 ==========================
 */
-
-let maintenance = false;
 
 app.post("/maintenance", (req, res) => {
 
-    if(req.headers.authorization !== `Bearer ${process.env.API_KEY}`){
-
-        return res.status(401).json({
-            error: "Unauthorized"
-        });
-
+    if (req.headers.authorization !== `Bearer ${process.env.API_KEY}`) {
+        return res.status(401).json({ error: "Unauthorized" });
     }
 
     maintenance = !!req.body.enabled;
 
-    console.log(
-        `Maintenance: ${maintenance}`
-    );
+    console.log(`[BOOTLOADER] Maintenance = ${maintenance}`);
 
-    res.json({
-        maintenance
-    });
-
+    res.json({ maintenance });
 });
 
 app.get("/maintenance", (req, res) => {
-
-    res.json({
-        maintenance
-    });
-
+    res.json({ maintenance });
 });
 
 /*
 ==========================
-Cleanup
+COMMAND SYSTEM (THIS IS WHERE mb.* LIVES)
+==========================
+*/
+
+const commands = new Map();
+
+/*
+Example:
+commands.set("startservices", () => {...})
+*/
+
+commands.set("status", () => {
+    return {
+        services,
+        maintenance
+    };
+});
+
+commands.set("stopservices", () => {
+    console.log("[BOOTLOADER] Stopping all services (logical state only)");
+    for (const id in services) {
+        services[id].status = "stopped";
+    }
+});
+
+commands.set("startservices", () => {
+    console.log("[BOOTLOADER] Marking services as starting...");
+    for (const id in services) {
+        services[id].status = "starting";
+    }
+});
+
+commands.set("restartservice", ({ id }) => {
+    if (!services[id]) return { error: "Service not found" };
+
+    console.log(`[BOOTLOADER] Restart request: ${id}`);
+    services[id].status = "restarting";
+});
+
+/*
+==========================
+COMMAND ENDPOINT
+==========================
+*/
+
+app.post("/command", (req, res) => {
+
+    if (req.headers.authorization !== `Bearer ${process.env.API_KEY}`) {
+        return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const { command, args } = req.body;
+
+    const fn = commands.get(command);
+
+    if (!fn) {
+        return res.status(404).json({
+            error: "Unknown command"
+        });
+    }
+
+    const result = fn(args || {});
+
+    res.json({
+        command,
+        result
+    });
+});
+
+/*
+==========================
+CLEANUP DEAD SERVICES
 ==========================
 */
 
 setInterval(() => {
 
-    const now = Date.now();
+    for (const id in services) {
 
-    for(const bot in bots){
+        if (isTimedOut(services[id])) {
 
-        if(now - bots[bot].lastSeen > 90000){
+            console.log(`[BOOTLOADER] ${id} timed out`);
 
-            delete bots[bot];
+            services[id].status = "offline";
 
-            console.log(`${bot} timed out.`);
-
+            delete services[id];
         }
-
     }
 
-},10000);
+}, 10000);
 
 /*
 ==========================
-Start
+START SERVER
 ==========================
 */
 
 app.listen(PORT, () => {
-
     console.log("");
     console.log("==================================");
-    console.log(" Mobby Bootloader");
+    console.log(" Mobby Bootloader v2");
     console.log("==================================");
     console.log(` Running on port ${PORT}`);
-    console.log(" Waiting for bots...");
+    console.log(` Maintenance: ${maintenance}`);
+    console.log(" Waiting for services...");
     console.log("==================================");
     console.log("");
-
 });
