@@ -18,32 +18,61 @@ STATE
 const services = new Map();
 
 let maintenance = false;
+let maintenanceTimeout = null;
 
 /*
 ==========================
-SERVICE REGISTRY
+SERVICES
 ==========================
 */
 
-function registerService(id, data = {}) {
+function registerService(id, name) {
     services.set(id, {
         id,
-        name: data.name || id,
+        name,
         status: "online",
-        lastHeartbeat: Date.now()
+        lastUpdate: Date.now()
     });
 }
 
-/*
-Pre-register your bots
-*/
-
-registerService("mobby", { name: "Mobby" });
-registerService("skycord", { name: "Skycord" });
+registerService("mobby", "Mobby");
+registerService("skycord", "Skycord");
 
 /*
 ==========================
-COMMAND HANDLER
+UTILS
+==========================
+*/
+
+function setAll(status) {
+    for (const s of services.values()) {
+        s.status = status;
+    }
+}
+
+function parseTime(input) {
+    const match = input.match(/^(\d+)(s|m|h|d|w|mo|y)$/);
+    if (!match) return null;
+
+    const value = parseInt(match[1]);
+    const unit = match[2];
+
+    const multipliers = {
+        s: 1000,
+        m: 1000 * 60,
+        h: 1000 * 60 * 60,
+        d: 1000 * 60 * 60 * 24,
+        w: 1000 * 60 * 60 * 24 * 7,
+        mo: 1000 * 60 * 60 * 24 * 30,
+        y: 1000 * 60 * 60 * 24 * 365
+    };
+
+    return value * (multipliers[unit] || 0);
+}
+
+/*
+==========================
+COMMANDS
 ==========================
 */
 
@@ -56,22 +85,27 @@ client.on("messageCreate", async (message) => {
     if (!message.content.startsWith(prefix)) return;
 
     const args = message.content.slice(prefix.length).trim().split(" ");
-    const command = args.shift()?.toLowerCase();
+    const cmd = args.shift()?.toLowerCase();
 
     /*
     ==========================
-    MAINTENANCE
+    HELP
     ==========================
     */
 
-    if (command === "maintenance") {
-        maintenance = !maintenance;
+    if (cmd === "help") {
+        return message.reply(`
+**Mobby Bootloader Commands**
 
-        return message.reply(
-            maintenance
-                ? "🚧 Maintenance ON"
-                : "🟢 Maintenance OFF"
-        );
+mb.help
+mb.status
+
+mb.startservices
+mb.stopservices
+
+mb.mt on/off
+mb.tm on <time>
+        `);
     }
 
     /*
@@ -80,64 +114,93 @@ client.on("messageCreate", async (message) => {
     ==========================
     */
 
-    if (command === "status") {
+    if (cmd === "status") {
 
-        let output = "**Mobby Bootloader Status**\n\n";
+        let out = "**Mobby Bootloader Status**\n\n";
 
-        for (const service of services.values()) {
-            output += `**${service.name}** - ${service.status}\n`;
+        for (const s of services.values()) {
+            out += `**${s.name}** → ${s.status}\n`;
         }
 
-        output += `\nMaintenance: ${maintenance ? "ON" : "OFF"}`;
+        out += `\nMaintenance: ${maintenance ? "ON" : "OFF"}`;
 
-        return message.reply(output);
+        return message.reply(out);
     }
 
     /*
     ==========================
-    START / STOP (LOGICAL ONLY)
+    START / STOP SERVICES
     ==========================
     */
 
-    if (command === "startservices") {
-
-        for (const s of services.values()) {
-            s.status = "online";
-        }
-
-        return message.reply("▶️ All services marked ONLINE");
+    if (cmd === "startservices") {
+        setAll("online");
+        return message.reply("🟢 All services set to ONLINE");
     }
 
-    if (command === "stopservices") {
-
-        for (const s of services.values()) {
-            s.status = "offline";
-        }
-
-        return message.reply("⛔ All services marked OFFLINE");
+    if (cmd === "stopservices") {
+        setAll("offline");
+        return message.reply("🔴 All services set to OFFLINE");
     }
 
     /*
     ==========================
-    RESTART SINGLE SERVICE
+    MAINTENANCE TOGGLE (NO TIMER)
     ==========================
     */
 
-    if (command === "restart") {
+    if (cmd === "mt") {
 
-        const id = args[0];
+        const mode = args[0];
 
-        if (!services.has(id)) {
-            return message.reply("❌ Service not found");
+        if (mode === "on") {
+            maintenance = true;
+            if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
+
+            return message.reply("🚧 Maintenance ENABLED");
         }
 
-        services.get(id).status = "restarting";
+        if (mode === "off") {
+            maintenance = false;
+            if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
 
-        setTimeout(() => {
-            services.get(id).status = "online";
-        }, 3000);
+            return message.reply("🟢 Maintenance DISABLED");
+        }
 
-        return message.reply(`🔄 Restarted ${id}`);
+        return message.reply("Usage: mb.mt on/off");
+    }
+
+    /*
+    ==========================
+    TIMED MAINTENANCE
+    ==========================
+    */
+
+    if (cmd === "tm") {
+
+        const mode = args[0];
+        const timeRaw = args[1];
+
+        if (mode !== "on") {
+            return message.reply("Usage: mb.tm on <time>");
+        }
+
+        const ms = parseTime(timeRaw);
+
+        if (!ms) {
+            return message.reply("Invalid time format. Example: 5m, 10s, 2h, 1d");
+        }
+
+        maintenance = true;
+
+        if (maintenanceTimeout) clearTimeout(maintenanceTimeout);
+
+        maintenanceTimeout = setTimeout(() => {
+            maintenance = false;
+            message.channel.send("🟢 Timed maintenance ended");
+        }, ms);
+
+        return message.reply(`🚧 Maintenance ON for ${timeRaw}`);
     }
 
 });
