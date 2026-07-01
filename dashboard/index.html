@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+    <title>Mobby Bootloader</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+
+        <header>
+            <h1>⚙️ Mobby Bootloader</h1>
+            <p id="statusLine">Loading services...</p>
+        </header>
+
+        <div id="controls">
+            <button onclick="toggleMaintenance(true)">Enable Maintenance</button>
+            <button onclick="toggleMaintenance(false)">Disable Maintenance</button>
+        </div>
+
+        <div id="services"></div>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
